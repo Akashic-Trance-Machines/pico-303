@@ -92,8 +92,8 @@ uint8_t prev_note = 0xFF;
 uint8_t noteOverlap = 0;
 
 // Placeholder for removed globals
-float volume = 0.5f;
-int16_t amp = 1500; // Reduced from 3000 to prevent clipping with high resonance/accent
+float volume = 0.6f;
+int16_t amp = 1700; // Reduced from 3000 to prevent clipping with high resonance/accent
 float dryWetMix = 0.25f;  // default to fully wet
 bool lastNoteWasAccented = false;
 float pitchOffset = 0.0f; // in semitones
@@ -324,8 +324,8 @@ void handleNoteOff(byte channel, byte pitch, byte velocity) {
  */
 void handleControlChange(byte channel, byte cc, byte value) {
   if (cc == 7) {  // Volume
-    // Rescale volume: Max (127) = 0.5 (safe level)
-    volume = (value / 127.0f) * 0.5f;
+    // Rescale volume: Max (127) = 0.6 (safe level)
+    volume = (value / 127.0f) * 0.6f;
     DEBUG_PRINTF("CC7 Volume: %.2f\n", volume);
   }
   else if (cc == 14) {  // Sub oscillator blend

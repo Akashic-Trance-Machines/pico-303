@@ -519,8 +519,22 @@
       s1 = s0;
       s0 = slideFlag ? 1 : 0;
 
-      if (dur === "rest" || !noteMap.includes(noteName)) {
+      if (dur === "tie") {
+        // Tie: Do not send Note On.
+        // Force slide (hold) so we don't cut off in mid-step
+        s0 = 1;
+        currentStep = (currentStep + 1) % 16;
+        return;
+      } else if (dur === "rest" || !noteMap.includes(noteName)) {
         s0 = 0; // Rest clears slide
+        // If we were holding a note (from a tie or slide), kill it now
+        if (note_x1 !== 0xFF) {
+          const note = note_x1 & 0x7F;
+          const accent = (note_x1 >> 7);
+          const velo = accent ? 127 : 63;
+          midiOutput?.send([0x80 + ch, note, velo]);
+          note_x1 = 0xFF;
+        }
       } else {
         // This is a valid note
         const pitch = 36 + noteMap.indexOf(noteName) + 12 * parseInt(octSel.value);
@@ -547,14 +561,26 @@
       const ch = parseInt(document.getElementById("midi-channel").value);
       const nextStep = currentStep;
 
+      // Identify CURRENT step (since currentStep was incremented)
+      const currentStepIdx = (currentStep - 1 + 16) % 16;
+      const currentDur = document.querySelector(`.duration[data-step="${currentStepIdx}"]`).value;
+
       // Look ahead to the NEXT step
       const nextNoteSel = document.querySelector(`.note[data-step="${nextStep}"]`);
       const nextDur = document.querySelector(`.duration[data-step="${nextStep}"]`).value;
       const nextNoteName = nextNoteSel.value;
 
-      // If next step is a rest, clear slide
-      if (nextDur === "rest" || !noteMap.includes(nextNoteName)) {
-        s0 = 0;
+      // If next step is a Tie, force slide (hold note)
+      if (nextDur === "tie") {
+        s0 = 1;
+      }
+      // If next step is a rest, clear slide...
+      else if (nextDur === "rest" || !noteMap.includes(nextNoteName)) {
+        // ...BUT only if the current step is NOT a tie.
+        // If current is tie, we want to hold until the start of the rest step.
+        if (currentDur !== "tie") {
+          s0 = 0;
+        }
       }
 
       // Send Note-OFF for note_x2 if it exists
