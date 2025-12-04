@@ -6,6 +6,12 @@
  * and integration of various synthesis components (Oscillator, Filter, Envelopes, Effects).
  */
 
+// =============================================================================
+// Build Configuration
+// =============================================================================
+// Uncomment the following line to enable the OLED Display and Rotary Encoder UI
+#define ENABLE_UI
+
 #include <algorithm>
 #include <Arduino.h>
 #include <Adafruit_TinyUSB.h>
@@ -23,8 +29,10 @@
 #include "LeakyIntegrator.h"
 #include "Distortion.h"
 #include "DCBlocker.h"
+#ifdef ENABLE_UI
 #include "UIManager.h"
 #include "DisplayManager.h"
+#endif
 
 // =============================================================================
 // Debug Configuration
@@ -42,8 +50,31 @@
 #endif
 
 // =============================================================================
+// Pin Definitions
+// =============================================================================
+// I2S pins
+#define pBCLK 10
+#define pDOUT 9
+// #define pLRCLK 11 (Implied by I2S library)
+
+// LED pin
+#define LED_PIN 25
+
+// UI Pins (OLED & Encoder)
+#ifdef ENABLE_UI
+  #define DISPLAY_I2C_SDA  2
+  #define DISPLAY_I2C_SCL  3
+  
+  #define ENCODER_A_PIN    6
+  #define ENCODER_B_PIN    7
+  #define ENCODER_SW_PIN   8
+#endif
+
+// =============================================================================
 // Globals & Objects
 // =============================================================================
+
+I2S i2sOut(OUTPUT, pBCLK, pDOUT);
 
 // Audio Objects
 Oscillator osc;
@@ -53,8 +84,10 @@ Distortion distFx;
 DCBlocker hpfPostFilter;
 
 // Synthesis objects
+#ifdef ENABLE_UI
 UIManager uiManager;
 DisplayManager displayManager;
+#endif
 
 // Open303 Envelopes & Voice State
 DecayEnvelope envFilt;      // Filter Envelope (was mainEnv)
@@ -70,18 +103,11 @@ float accent = 0.5f;  // 0..1
 // Audio Buffer
 const int sampleRate = 44100;
 
-// I2S pins
-#define pBCLK 10
-#define pDOUT 9
-
-I2S i2sOut(OUTPUT, pBCLK, pDOUT);
-
 // MIDI
 Adafruit_USBD_MIDI usb_midi;
 MIDI_CREATE_INSTANCE(Adafruit_USBD_MIDI, usb_midi, MIDI);
 
-// LED pin
-const int LED_PIN = 25;
+// LED
 uint32_t ledOnUntil = 20;
 
 volatile uint32_t clockTickCount = 0;
@@ -114,10 +140,12 @@ int delayModR = 0;
 StereoDelay stereoDelay;
 
 // Flag to trigger display update when MIDI CC changes a parameter
+#ifdef ENABLE_UI
 volatile bool midiNeedsDisplayUpdate = false;
 
-// Mutex for synchronizing parameter changes between cores
+// Mutex for synchronizing parameter changes between cores (or interrupts)
 auto_init_mutex(paramMutex);
+#endif
 
 // ---- DMA Audio Block Processing ----
 #define AUDIO_BLOCK_SIZE 256  // samples per stereo frame (larger = more CPU headroom)
@@ -179,6 +207,7 @@ void fillAudioBlock() {
   }
 }
 
+#ifdef ENABLE_UI
 /**
  * @brief Callback for UI parameter changes
  * Routes encoder changes to the internal MIDI CC handler
@@ -194,6 +223,7 @@ void onParameterChange(uint8_t cc, uint8_t value) {
     mutex_exit(&paramMutex);
   }
 }
+#endif
 
 /**
  * @brief Arduino Setup function.
@@ -253,10 +283,11 @@ void setup() {
   hpfPostFilter.setCutoff(30.0f); // ~25-30Hz like Open303
   
   // UI setup
-  uiManager.begin();
+#ifdef ENABLE_UI
+  uiManager.begin(ENCODER_A_PIN, ENCODER_B_PIN, ENCODER_SW_PIN);
   uiManager.setParameterCallback(onParameterChange);
   
-  if (!displayManager.begin()) {
+  if (!displayManager.begin(DISPLAY_I2C_SDA, DISPLAY_I2C_SCL)) {
     DEBUG_PRINTLN("ERROR: Failed to initialize display!");
   } else {
     DEBUG_PRINTLN("Display initialized");
@@ -264,6 +295,7 @@ void setup() {
     const Parameter& param = uiManager.getParameter(0);
     displayManager.renderMenu(param);
   }
+#endif
   
   // Core 1 is unused in this single-core implementation
   DEBUG_PRINTLN("Setup complete - Single Core Mode");
@@ -293,6 +325,7 @@ void loop() {
 
   // --- UI Update ---
   // Runs between audio block fills
+#ifdef ENABLE_UI
   static uint32_t lastUiCheck = 0;
   static bool uiNeedsRedraw = false;
   static uint32_t lastDisplayUpdate = 0;
@@ -320,6 +353,7 @@ void loop() {
       }
     }
   }
+#endif
 }
 
 // ---- MIDI handlers ----
@@ -417,9 +451,12 @@ void handleNoteOff(byte channel, byte pitch, byte velocity) {
  */
 void handleControlChange(byte channel, byte cc, byte value) {
   // Sync parameter value with UI (so encoder displays current value)
+  // Sync parameter value with UI (so encoder displays current value)
+#ifdef ENABLE_UI
   uiManager.updateParameterValue(cc, value);
   // Trigger display update so OLED shows the new value
   midiNeedsDisplayUpdate = true;
+#endif
   if (cc == 7) {  // Volume
     // Rescale volume: Max (127) = 0.6 (safe level)
     volume = (value / 127.0f) * 0.6f;

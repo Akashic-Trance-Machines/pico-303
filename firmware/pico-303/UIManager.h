@@ -12,10 +12,10 @@
 
 #include <Arduino.h>
 
-// Pin definitions
-#define ENCODER_A_PIN   6
-#define ENCODER_B_PIN   7
-#define ENCODER_SW_PIN  8
+// Pin definitions moved to main sketch
+// #define ENCODER_A_PIN   6
+// #define ENCODER_B_PIN   7
+// #define ENCODER_SW_PIN  8
 
 // UI States
 enum UIState {
@@ -38,8 +38,11 @@ public:
   
   /**
    * @brief Initialize encoder pins and UI state
+   * @param pinA Encoder A pin
+   * @param pinB Encoder B pin
+   * @param pinSW Encoder Switch pin
    */
-  void begin();
+  void begin(uint8_t pinA, uint8_t pinB, uint8_t pinSW);
   
   /**
    * @brief Updates UI state.
@@ -113,6 +116,11 @@ private:
   
   // Callback for parameter changes
   void (*parameterCallback)(uint8_t cc, uint8_t value);
+  
+  // Pin definitions
+  static uint8_t pinA;
+  static uint8_t pinB;
+  static uint8_t pinSW;
 };
 
 #endif // UIMANAGER_H

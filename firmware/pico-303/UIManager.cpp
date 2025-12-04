@@ -18,6 +18,9 @@ const int8_t UIManager::kQuadratureTable[4][4] = {
 volatile uint8_t UIManager::lastEncoderState = 0;
 volatile uint32_t UIManager::lastEncoderTime = 0;
 volatile int16_t UIManager::encoderDelta = 0;
+uint8_t UIManager::pinA = 0;
+uint8_t UIManager::pinB = 0;
+uint8_t UIManager::pinSW = 0;
 
 // Parameter definitions (24 parameters from pico-303)
 Parameter UIManager::parameters[] = {
@@ -56,24 +59,28 @@ UIManager::UIManager()
 {
 }
 
-void UIManager::begin() {
+void UIManager::begin(uint8_t pinA, uint8_t pinB, uint8_t pinSW) {
+  UIManager::pinA = pinA;
+  UIManager::pinB = pinB;
+  UIManager::pinSW = pinSW;
+
   // Configure encoder pins
-  pinMode(ENCODER_A_PIN, INPUT_PULLUP);
-  pinMode(ENCODER_B_PIN, INPUT_PULLUP);
-  pinMode(ENCODER_SW_PIN, INPUT_PULLUP);
+  pinMode(pinA, INPUT_PULLUP);
+  pinMode(pinB, INPUT_PULLUP);
+  pinMode(pinSW, INPUT_PULLUP);
   
   // Read initial encoder state
-  uint8_t a = digitalRead(ENCODER_A_PIN);
-  uint8_t b = digitalRead(ENCODER_B_PIN);
+  uint8_t a = digitalRead(pinA);
+  uint8_t b = digitalRead(pinB);
   lastEncoderState = (a << 1) | b;
   lastEncoderTime = millis();
   
   // Attach interrupts for encoder pins
-  attachInterrupt(digitalPinToInterrupt(ENCODER_A_PIN), handleEncoderInterrupt, CHANGE);
-  attachInterrupt(digitalPinToInterrupt(ENCODER_B_PIN), handleEncoderInterrupt, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(pinA), handleEncoderInterrupt, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(pinB), handleEncoderInterrupt, CHANGE);
   
   // Read initial button state
-  lastButtonState = digitalRead(ENCODER_SW_PIN);
+  lastButtonState = digitalRead(pinSW);
   lastButtonTime = millis();
 }
 
@@ -140,8 +147,8 @@ bool UIManager::update() {
 
 void UIManager::handleEncoderInterrupt() {
   // Read current encoder pins
-  uint8_t a = digitalRead(ENCODER_A_PIN);
-  uint8_t b = digitalRead(ENCODER_B_PIN);
+  uint8_t a = digitalRead(pinA);
+  uint8_t b = digitalRead(pinB);
   uint8_t currentState = (a << 1) | b;
   
   // Look up delta from quadrature table
@@ -182,7 +189,7 @@ uint8_t UIManager::calculateAcceleration(uint32_t deltaTime) {
 }
 
 bool UIManager::readButton() {
-  bool currentState = digitalRead(ENCODER_SW_PIN);
+  bool currentState = digitalRead(pinSW);
   uint32_t now = millis();
   
   // Button is active low (pressed = LOW)

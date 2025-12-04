@@ -16,10 +16,10 @@ DisplayManager::DisplayManager()
 {
 }
 
-bool DisplayManager::begin() {
+bool DisplayManager::begin(uint8_t sda, uint8_t scl) {
   // Initialize I2C on bus 1
-  Wire1.setSDA(DISPLAY_I2C_SDA);
-  Wire1.setSCL(DISPLAY_I2C_SCL);
+  Wire1.setSDA(sda);
+  Wire1.setSCL(scl);
   Wire1.begin();
   
   // Initialize display

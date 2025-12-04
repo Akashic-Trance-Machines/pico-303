@@ -14,10 +14,10 @@
 #include <Adafruit_SSD1306.h>
 #include "UIManager.h"
 
-// Display configuration
-#define DISPLAY_I2C_BUS  1
-#define DISPLAY_I2C_SDA  2
-#define DISPLAY_I2C_SCL  3
+// Display configuration moved to main sketch
+// #define DISPLAY_I2C_BUS  1
+// #define DISPLAY_I2C_SDA  2
+// #define DISPLAY_I2C_SCL  3
 #define DISPLAY_I2C_ADDR 0x3C
 #define DISPLAY_W 128
 #define DISPLAY_H 32
@@ -28,9 +28,11 @@ public:
   
   /**
    * @brief Initialize I2C and OLED display
+   * @param sda I2C SDA pin
+   * @param scl I2C SCL pin
    * @return true if initialization successful
    */
-  bool begin();
+  bool begin(uint8_t sda, uint8_t scl);
   
   /**
    * @brief Render menu state (parameter name with arrows)

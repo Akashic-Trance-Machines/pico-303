@@ -13,6 +13,44 @@ This project stands on the shoulders of giants. Huge thanks to:
 
 The audio output is handled by a **PCM5100A Stereo DAC** connected to the Raspberry Pi Pico 2 via I2S. This provides high-quality, low-noise audio output far superior to PWM.
 
+## Hardware
+*   **Microcontroller**: [Raspberry Pi Pico 2 (RP2350)](https://www.raspberrypi.com/products/raspberry-pi-pico-2/)
+*   **Audio**: [Pimoroni Pico Audio Pack](https://shop.pimoroni.com/products/pico-audio-pack?variant=32369490853971) (PCM5100A DAC)
+*   **Display**: SSD1306 OLED (128x32)
+*   **Input**: Rotary Encoder with Push Button
+
+<div style="display: flex; justify-content: space-around; flex-wrap: wrap;">
+  <img src="images/setup01.jpg" alt="Setup 1" style="width: 49%; max-width: 400px; margin-bottom: 10px;">
+  <img src="images/setup02.jpg" alt="Setup 2" style="width: 49%; max-width: 400px; margin-bottom: 10px;">
+</div>
+
+### Pinout Connections
+
+| Component | Pin | Pico GPIO | Description |
+| :--- | :--- | :--- | :--- |
+| **OLED** | SDA | GP2 | I2C Data |
+| | SCL | GP3 | I2C Clock |
+| **Encoder** | A | GP6 | Encoder Pin A |
+| | B | GP7 | Encoder Pin B |
+| | SW | GP8 | Encoder Push Button |
+| **Audio Pack** | DATA | GP9 | I2S Data Out (DOUT) |
+| | BCLK | GP10 | I2S Bit Clock |
+| | LRCLK | GP11 | I2S Word Clock (L/R) |
+
+## Build Instructions
+
+1.  **Install Arduino IDE**.
+2.  **Install RP2040/RP2350 Core**: Add `https://github.com/earlephilhower/arduino-pico/releases/download/global/package_rp2040_index.json` to your Additional Boards Manager URLs and install **Raspberry Pi Pico/RP2040** by Earle F. Philhower, III.
+3.  **Select Board**: Tools > Board > Raspberry Pi Pico/RP2040 > **Raspberry Pi Pico 2**.
+4.  **CPU Speed**: Tools > CPU Speed > **250 MHz (Overclock)**.
+5.  **USB Stack**: Tools > USB Stack > **Adafruit TinyUSB**.
+6.  **Install Libraries** (via Library Manager):
+    *   `Adafruit TinyUSB Library`
+    *   `MIDI Library` (by Forty Seven Effects)
+    *   `Adafruit SSD1306`
+    *   `Adafruit GFX Library`
+7.  **Compile & Upload**: Connect your Pico 2 while holding BOOTSEL, then upload.
+
 ## Web Controller
 
 [https://akashic-trance-machines.github.io/pico-303](https://akashic-trance-machines.github.io/pico-303/) a MIDI controller/sequencer for the pico-303. Use Google Chrome for the MIDI connection.
