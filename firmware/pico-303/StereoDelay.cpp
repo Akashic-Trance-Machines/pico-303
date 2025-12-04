@@ -19,20 +19,23 @@ bool StereoDelay::begin() {
   bufferL.resize(maxDelaySamples, 0.0f);
   bufferR.resize(maxDelaySamples, 0.0f);
   
+  // Calculate smoothing coefficient for 400ms ramp time
+  // Using one-pole lowpass: coeff = 1 - exp(-1 / (rampTime * sampleRate))
+  float rampTimeSec = 0.4f; // 400ms
+  smoothingCoeff = 1.0f - std::exp(-1.0f / (rampTimeSec * sampleRate));
+  
   // Check if allocation succeeded (though std::vector usually throws)
   return (bufferL.size() == maxDelaySamples && bufferR.size() == maxDelaySamples);
 }
 
-void StereoDelay::setSampleRate(float sr) {
-  sampleRate = sr;
-}
-
 void StereoDelay::setTimeSamplesL(int samples) {
-  delaySamplesL = std::max(1, std::min(samples, maxDelaySamples - 1));
+  // Set target, actual value will smoothly ramp in tick()
+  targetDelaySamplesL = std::max(1.0f, std::min((float)samples, (float)(maxDelaySamples - 1)));
 }
 
 void StereoDelay::setTimeSamplesR(int samples) {
-  delaySamplesR = std::max(1, std::min(samples, maxDelaySamples - 1));
+  // Set target, actual value will smoothly ramp in tick()
+  targetDelaySamplesR = std::max(1.0f, std::min((float)samples, (float)(maxDelaySamples - 1)));
 }
 
 void StereoDelay::setFeedback(float fb) {
@@ -46,7 +49,7 @@ void StereoDelay::setMix(float m) {
 float StereoDelay::processL(float input) {
   if (bufferL.empty()) return input; // Safety check
 
-  int readIndex = writeIndex - delaySamplesL;
+  int readIndex = writeIndex - (int)delaySamplesL;
   if (readIndex < 0) readIndex += maxDelaySamples;
   
   float delayed = bufferL[readIndex];
@@ -56,7 +59,7 @@ float StereoDelay::processL(float input) {
 float StereoDelay::processR(float input) {
   if (bufferR.empty()) return input; // Safety check
 
-  int readIndex = writeIndex - delaySamplesR;
+  int readIndex = writeIndex - (int)delaySamplesR;
   if (readIndex < 0) readIndex += maxDelaySamples;
   
   float delayed = bufferR[readIndex];
@@ -66,10 +69,14 @@ float StereoDelay::processR(float input) {
 void StereoDelay::tick(float inL, float inR) {
   if (bufferL.empty() || bufferR.empty()) return;
 
-  int readIndexL = writeIndex - delaySamplesL;
+  // Smooth delay time changes (one-pole lowpass filter)
+  delaySamplesL += smoothingCoeff * (targetDelaySamplesL - delaySamplesL);
+  delaySamplesR += smoothingCoeff * (targetDelaySamplesR - delaySamplesR);
+
+  int readIndexL = writeIndex - (int)delaySamplesL;
   if (readIndexL < 0) readIndexL += maxDelaySamples;
   
-  int readIndexR = writeIndex - delaySamplesR;
+  int readIndexR = writeIndex - (int)delaySamplesR;
   if (readIndexR < 0) readIndexR += maxDelaySamples;
 
   float delayedL = bufferL[readIndexL];
@@ -80,8 +87,10 @@ void StereoDelay::tick(float inL, float inR) {
   float nextR = inR + delayedR * feedback;
   
   // Soft clip feedback to prevent explosion
-  nextL = std::tanh(nextL);
-  nextR = std::tanh(nextR);
+  // Fast sigmoid approximation: x / (1 + |x|)
+  // Much faster than std::tanh and sufficient for feedback saturation
+  nextL = nextL / (1.0f + std::abs(nextL));
+  nextR = nextR / (1.0f + std::abs(nextR));
 
   bufferL[writeIndex] = nextL;
   bufferR[writeIndex] = nextR;

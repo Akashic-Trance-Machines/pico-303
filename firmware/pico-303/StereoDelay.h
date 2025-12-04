@@ -28,12 +28,6 @@ public:
   bool begin(); 
 
   /**
-   * @brief Sets the sample rate.
-   * @param sr Sample rate in Hz
-   */
-  void setSampleRate(float sr);
-
-  /**
    * @brief Sets the left channel delay time.
    * @param samples Delay time in samples
    */
@@ -86,8 +80,18 @@ private:
   int writeIndex = 0;
   
   float sampleRate = 44100.0f;
-  int delaySamplesL = 10000;
-  int delaySamplesR = 10000;
+  
+  // Current delay times (smoothed)
+  float delaySamplesL = 10000.0f;
+  float delaySamplesR = 10000.0f;
+  
+  // Target delay times (set by user)
+  float targetDelaySamplesL = 10000.0f;
+  float targetDelaySamplesR = 10000.0f;
+  
+  // Smoothing coefficient (calculated from ramp time)
+  float smoothingCoeff = 0.0f;
+  
   float feedback = 0.3f;
   float mix = 0.3f;
 };

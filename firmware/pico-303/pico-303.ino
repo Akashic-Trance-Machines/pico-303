@@ -13,6 +13,7 @@
 #include <I2S.h>
 #include <AudioBufferManager.h>
 #include <cmath>
+#include <pico/mutex.h>
 
 #include "Oscillator.h"
 #include "Filter303.h"
@@ -22,6 +23,8 @@
 #include "LeakyIntegrator.h"
 #include "Distortion.h"
 #include "DCBlocker.h"
+#include "UIManager.h"
+#include "DisplayManager.h"
 
 // =============================================================================
 // Debug Configuration
@@ -49,6 +52,10 @@ StereoDelay delayFx;
 Distortion distFx;
 DCBlocker hpfPostFilter;
 
+// UI Objects
+UIManager uiManager;
+DisplayManager displayManager;
+
 // Open303 Envelopes & Voice State
 DecayEnvelope envFilt;      // Filter Envelope (was mainEnv)
 AnalogEnvelope envAmp;      // Amp Envelope (was ampEnv)
@@ -62,12 +69,10 @@ float accent = 0.5f;  // 0..1
 
 // Audio Buffer
 const int sampleRate = 44100;
-const int bufferSize = 128;
-int16_t buffer[bufferSize * 2]; // Stereo buffer
 
 // I2S pins
-#define pBCLK 20
-#define pDOUT 19
+#define pBCLK 10
+#define pDOUT 9
 
 I2S i2sOut(OUTPUT, pBCLK, pDOUT);
 
@@ -93,14 +98,11 @@ uint8_t noteOverlap = 0;
 
 // Placeholder for removed globals
 float volume = 0.6f;
-int16_t amp = 1700; // Reduced from 3000 to prevent clipping with high resonance/accent
 float dryWetMix = 0.25f;  // default to fully wet
 bool lastNoteWasAccented = false;
 float pitchOffset = 0.0f; // in semitones
 float globalEnvMod = 2000.0f;
-float driveAmount = 1.0f;  // pre-filter saturation drive
 float glideTimeMs = 80.0f;  // default TB-303 glide time
-
 float userDecayTime = 1000.0f; // Store user setting for decay
 
 // ---- Delay globals ----
@@ -109,16 +111,35 @@ int delayTimeSamplesL = 22050;
 int delayTimeSamplesR = 22050;
 float delayFeedback = 0.5f;
 float delayMix = 0.3f;
-float delayLpfL = 0.0f;
-float delayLpfR = 0.0f;
-float delayLpfAmount = 0.3f;
-int stereoOffsetSamples = 220;  // ~5ms at 44.1kHz
 
 // Delay modifiers: 0 = Full, 1 = Dotted, 2 = Triplet
 int delayModL = 0;
 int delayModR = 0;
 
 StereoDelay stereoDelay;
+
+// UI display refresh timing
+uint32_t lastDisplayUpdate = 0;
+const uint32_t displayUpdateInterval = 500; // 20Hz refresh rate
+
+// Mutex for synchronizing parameter changes between cores
+auto_init_mutex(paramMutex);
+
+/**
+ * @brief Callback for UI parameter changes
+ * Routes encoder changes to the internal MIDI CC handler
+ * Uses non-blocking mutex to prevent deadlocks
+ */
+void onParameterChange(uint8_t cc, uint8_t value) {
+  // Try to acquire lock - if audio is using it, skip this update
+  // This prevents encoder from blocking
+  if (mutex_try_enter(&paramMutex, nullptr)) {
+    handleControlChange(1, cc, value);
+    mutex_exit(&paramMutex);
+  }
+  // If we couldn't get the lock, the parameter change is dropped
+  // This is acceptable - next encoder step will try again
+}
 
 /**
  * @brief Arduino Setup function.
@@ -132,6 +153,9 @@ void setup() {
 
   // I2S setup
   i2sOut.setBitsPerSample(16);
+  // Increase buffer size to handle UI blocking (4 buffers of 512 words = ~46ms)
+  // Default is usually 4x64 or 4x128.
+  i2sOut.setBuffers(4, 512);
   if (!i2sOut.begin(sampleRate)) {
     DEBUG_PRINTLN("I2S init failed");
     while (1);
@@ -156,11 +180,12 @@ void setup() {
   filter.setResonance(0.0f);
   filter.setEnvMod(500.0f);      // how much the envelope modulates cutoff
 
-  stereoDelay.setSampleRate(sampleRate);
   if (!stereoDelay.begin()) {
     DEBUG_PRINTLN("ERROR: Failed to allocate delay buffer!");
   }
-  stereoDelay.setTimeSamplesL(11025); // 250ms0Hz LPF (tau ~= 0.8ms)
+  stereoDelay.setTimeSamplesL(11025); 
+  stereoDelay.setTimeSamplesR(11025); 
+
   // Let's use 2.0ms to be safe and smooth.
   ampDeClicker.setSampleRate(sampleRate);
   ampDeClicker.setTimeConstant(2.0f); 
@@ -168,6 +193,22 @@ void setup() {
   // Post-filter HPF to remove DC offset (crucial for distortion)
   hpfPostFilter.setSampleRate(sampleRate);
   hpfPostFilter.setCutoff(30.0f); // ~25-30Hz like Open303
+  
+  // UI setup
+  uiManager.begin();
+  uiManager.setParameterCallback(onParameterChange);
+  
+  if (!displayManager.begin()) {
+    DEBUG_PRINTLN("ERROR: Failed to initialize display!");
+  } else {
+    DEBUG_PRINTLN("Display initialized");
+    // Show initial menu item
+    const Parameter& param = uiManager.getParameter(0);
+    displayManager.renderMenu(param);
+  }
+  
+  // Core 1 is unused in this single-core implementation
+  DEBUG_PRINTLN("Setup complete - Single Core Mode");
 }
 
 /**
@@ -176,6 +217,7 @@ void setup() {
  * Note: Audio processing happens in the loop, pushing samples to the I2S buffer.
  */
 void loop() {
+  // Core 0: Audio processing only (UI runs on Core 1)
   MIDI.read();
 
   if (millis() > ledOnUntil) {
@@ -219,13 +261,43 @@ void loop() {
   stereoDelay.tick(dryL, dryR);
 
   // Soft Clipper on final output (Musical limiting)
-  // We attenuate the input by 0.10x (was 0.15x) to handle the high dynamic range.
+  // We attenuate the input by 0.10x to handle the high dynamic range.
   // Output is scaled to 30000 to use the full 16-bit range.
   float finalL = std::tanh(outL * 0.10f) * 30000.0f;
   float finalR = std::tanh(outR * 0.10f) * 30000.0f;
 
   i2sOut.write((int16_t)finalL);
   i2sOut.write((int16_t)finalR);
+
+  // --- UI Update (Interleaved) ---
+  // We check UI only periodically to avoid blocking audio too often.
+  // Note: displayManager.render...() is blocking (I2C) and WILL cause audio glitches.
+  static uint32_t lastUiCheck = 0;
+  static bool uiNeedsRedraw = false;
+  static uint32_t lastDisplayUpdate = 0;
+
+  // Check UI every 10ms (approx)
+  if (millis() - lastUiCheck > 5) {
+    lastUiCheck = millis();
+    
+    // Update encoder (fast)
+    if (uiManager.update()) {
+      uiNeedsRedraw = true;
+    }
+
+    // Update display (slow) - throttled to 100ms
+    if (uiNeedsRedraw && (millis() - lastDisplayUpdate >= 200)) {
+      lastDisplayUpdate = millis();
+      uiNeedsRedraw = false;
+      
+      const Parameter& currentParam = uiManager.getParameter(uiManager.getCurrentParamIndex());
+      if (uiManager.getState() == UI_MENU) {
+        displayManager.renderMenu(currentParam);
+      } else {
+        displayManager.renderEdit(currentParam);
+      }
+    }
+  }
 }
 
 // ---- MIDI handlers ----
@@ -280,7 +352,6 @@ void handleNoteOn(byte channel, byte pitch, byte velocity) {
     filter.setEnvMod(modAmt);
   }
 
-  amp = 3000;
   lastNoteWasAccented = accent;
 
   DEBUG_PRINTF("NoteON ch%u pitch%u vel%u slide=%d accent=%d\n",
@@ -323,6 +394,9 @@ void handleNoteOff(byte channel, byte pitch, byte velocity) {
  * @param value Control value (0-127)
  */
 void handleControlChange(byte channel, byte cc, byte value) {
+  // Sync parameter value with UI (so encoder displays current value)
+  uiManager.updateParameterValue(cc, value);
+  
   if (cc == 7) {  // Volume
     // Rescale volume: Max (127) = 0.6 (safe level)
     volume = (value / 127.0f) * 0.6f;
@@ -368,10 +442,6 @@ void handleControlChange(byte channel, byte cc, byte value) {
     envFilt.setDecayTime(userDecayTime); // Update immediately
     DEBUG_PRINTF("CC75 Decay Time: %.2f ms\n", userDecayTime);
   }
-  else if (cc == 76) {  // Pre-filter drive
-    driveAmount = 1.0f + (value / 127.0f) * 4.0f;  // 1x to 5x drive
-    DEBUG_PRINTF("CC76 Drive Amount: %.2f\n", driveAmount);
-  }
   else if (cc == 77) {  // Distortion mode
     distFx.setType(static_cast<Distortion::Type>(value % 5));
     DEBUG_PRINTF("CC77 Dist Mode: %d\n", value % 5);
@@ -386,7 +456,7 @@ void handleControlChange(byte channel, byte cc, byte value) {
     distFx.setMix(mix);
     DEBUG_PRINTF("CC79 Dist Mix: %.2f\n", mix);
   }
-  else if (cc == 80) {  // Distortion On/Off (was Tone Amount)
+  else if (cc == 80) {  // Distortion On/Off
     bool on = value > 63;
     distFx.setEnabled(on);
     DEBUG_PRINTF("CC80 Dist Enable: %d\n", on);
@@ -408,10 +478,6 @@ void handleControlChange(byte channel, byte cc, byte value) {
     stereoDelay.setMix(delayMix);
     DEBUG_PRINTF("CC83 Mix: %.2f\n", delayMix);
   }
-  else if (cc == 84) {  // Delay LPF amount
-    delayLpfAmount = value / 127.0f;
-    DEBUG_PRINTF("CC84 Delay LPF Amount: %.2f\n", delayLpfAmount);
-  }
   else if (cc == 86) {
     int div = max(1, value / 16);  // Map 0–127 to divs
     float beats = pow(2, div - 1) / 4.0f;  // 1/16, 1/8, 1/4, etc.
@@ -420,10 +486,6 @@ void handleControlChange(byte channel, byte cc, byte value) {
     stereoDelay.setTimeSamplesL(delayTimeSamplesL);
     stereoDelay.setTimeSamplesR(delayTimeSamplesR);
     DEBUG_PRINTF("CC86 Delay Sync Division: 1/%d beat, %d samples (BPM %.1f)\n", (int)(1.0f / beats), delayTimeSamplesL, bpm);
-  }
-  else if (cc == 88) {  // Stereo Offset
-    stereoOffsetSamples = map(value, 0, 127, 0, 1024);  // up to ~23ms at 44.1kHz
-    DEBUG_PRINTF("CC88 Stereo Offset: %d samples\n", stereoOffsetSamples);
   }
   else if (cc == 91) {
     int div = max(1, value / 16);

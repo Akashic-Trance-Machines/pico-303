@@ -33,7 +33,10 @@ float Distortion::process(float input) {
 }
 
 float Distortion::processSoftClip(float x, float drive) {
-  return std::tanh(x * drive);
+  float val = x * drive;
+  // Fast sigmoid: x / (1 + |x|)
+  // Much faster than std::tanh and sounds similar (slightly softer knee)
+  return val / (1.0f + std::abs(val));
 }
 
 float Distortion::processHardClip(float x, float drive) {
@@ -54,11 +57,12 @@ float Distortion::processDiode(float x, float drive) {
   // Asymmetric clipping simulation
   float val = x * drive;
   if (val >= 0) {
-    return std::tanh(val); // Positive swings clip normally
+    return val / (1.0f + val); // Positive swings clip normally
   } else {
     // Negative swings clip harder/earlier (or softer depending on diode config)
     // Let's simulate a diode that conducts differently
-    return std::tanh(val * 0.5f) * 2.0f; // Softer clipping on negative
+    float v = val * 0.5f;
+    return (v / (1.0f + std::abs(v))) * 2.0f; // Softer clipping on negative
   }
 }
 
@@ -79,5 +83,5 @@ float Distortion::processWaveNet(float x, float drive) {
   float out = val - 0.2f * val * val; 
   
   // Soft clip the result
-  return std::tanh(out) * 1.2f; // Makeup gain
+  return (out / (1.0f + std::abs(out))) * 1.2f; // Makeup gain
 }
